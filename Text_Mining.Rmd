@@ -1,0 +1,605 @@
+---
+title: "Business Intelligence Using Text Mining"
+author: "Abhay Kulkarni"
+date: "11/18/2019"
+output:
+  pdf_document: 
+    fig_caption: yes
+    number_sections: yes
+    toc: yes
+    latex_engine: lualatex
+  github_document: default
+  html_document:
+    toc: yes
+    toc_depth: '3'
+    df_print: paged
+header-includes:
+- \usepackage{titling}
+- \pretitle{\begin{center}\LARGE\includegraphics[height=20cm]{ProjectCover.jpg}\\[\bigskipamount]}
+- \posttitle{\end{center}}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)  
+```
+
+\newpage
+
+
+
+# Introduction
+
+## What is Shark Tank?   
+   
+Shark Tank is an American business reality television series on ABC that premiered on August 9, 2009.[1] The show is the American franchise of the international format Dragons' Den, which originated in Japan as Tigers of Money in 2001. It shows entrepreneurs making business presentations to a panel of five investors or "sharks," who decide whether to invest in their company.    
+   
+       
+# Project Objective  
+
+## Step 1 
+   
+* A dataset of Shark Tank episodes is made available. It contains 495 entrepreneurs making their pitch to the VC sharks.
+You will ONLY use the “Description” column for the initial Text Mining exercise.
+
+* Extract the text into text corpus and perform the following operations:
+
+* Create Document Text Matrix
+
+* Use “Deal” as a Dependent Variable
+
+* Use the CART model and arrive at your CART diagram
+
+* Build a Logistic Regression Model and find out your accuracy of the model
+
+* Build the RandomForest model and arrive at your varImpPlot   
+    
+        
+## Step 2
+
+* Now, add a variable to your analysis called “ratio”. This variable is “askedfor/valuation”. (This variable is to be added as a column to your dataframe in Step 1)
+
+* Rebuild “New” models- CART, RandomForest and Logistic Regression
+
+
+
+
+## Step 3   
+   
+* CART Tree (Before and After)
+
+* RandomForest plot (Before and After)   
+
+* Confusion Matrix of Logistic Regression (Before and After) 
+
+\newpage
+# Libraries/ Packages
+```{r message=FALSE, warning=FALSE}
+library(tm)
+library(SnowballC)
+library(randomForest)
+library(RColorBrewer)
+library(wordcloud)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(caTools)
+library(latexpdf)
+
+
+```
+
+
+\newpage
+
+# Speeding Processor Cores
+
+```{r}
+library(parallel)
+library(doParallel)
+clusterforspeed <- makeCluster(detectCores() - 1) ## convention to leave 1 core for OS
+registerDoParallel(clusterforspeed)
+```
+
+\newpage
+
+```{r}
+setwd("H:\\Github PROJECTS\\Text-Mining_SharkTank\\Text-Mining_SharkTank")
+getwd()
+```
+
+# Import Dataset and Representation along with data cleaning   
+    
+## Import Dataset
+
+```{r}
+SharkTankData = read.csv("Dataset.csv", stringsAsFactors=FALSE)
+```
+
+## Data Cleaning   
+   
+1. Transform to lower   
+   
+2. Remove Numbers
+
+3. Remove Punctuation
+
+4. Remove Stopwords
+
+5. Stem Document
+
+6. Strip Whitespace
+  
+
+
+
+```{r warning=FALSE}
+corpus = Corpus(VectorSource(SharkTankData$description))
+corpus = tm_map(corpus, content_transformer(tolower))
+corpus = tm_map(corpus, removeNumbers)
+corpus = tm_map(corpus, removePunctuation)
+corpus = tm_map(corpus, removeWords, c("the", "and", "is" , "in", "for", "where", "when","make","made","like","use","can","compani","company", stopwords("english")))
+corpus = tm_map(corpus, stemDocument)
+corpus = tm_map(corpus, stripWhitespace)
+
+```
+
+## Word Cloud
+```{r warning=FALSE}
+palette =  brewer.pal(8, "Dark2")
+wordcloud(corpus,colors=palette, min.freq = 1, max.words = Inf,rot.per=0.35, random.order = FALSE)
+```
+
+
+
+## Build a Document-Term Matrix (DTM)
+
+```{r}
+DTM <- DocumentTermMatrix(corpus)
+DTM
+```
+
+
+
+## To reduce the dimensions in DTM, removeSparseTerms and sparsity less than 0.995
+
+```{r}
+sparse = removeSparseTerms(DTM, 0.995)
+```
+
+```{r}
+sparse
+```
+
+##  Let's visualize  DocumentTermMatrix
+
+```{r}
+TDMplot <- as.matrix(sparse)
+TDFrequency <- colSums(TDMplot)
+TFrequencyPlot<- sort(TDFrequency,decreasing = TRUE)
+barplotTDM <- barplot(TFrequencyPlot[1:15],col='tan',las=2)
+
+
+```
+
+
+ **Findings **   
+  
+  * The above Barplot shows us the top 15 most frequent word in the Corpus.
+  * Design, product, water, flavour gives us an idea of the pitch made by companies to Sharks.
+  
+
+
+
+
+
+
+## Convert to data.frame
+```{r}
+descSparse = as.data.frame(as.matrix(sparse))
+```
+
+
+
+
+##  Add dependent variable to the dataframe. "Deal" is the dependent variable
+
+```{r}
+descSparse$deal <- SharkTankData$deal
+```
+
+
+
+## Check how many TRUE vs FALSE are there in dependent variable
+
+```{r}
+table(descSparse$deal)
+```
+
+
+
+ **Findings **   
+  
+  * This is a Balanced Dataset. TRUE and FALSE are almost 50% each.
+  
+  
+  
+
+
+## Create Backup of the dataset
+```{r}
+backupSharkTank <- descSparse
+```
+
+
+## Encoding the target feature as factor
+
+
+```{r}
+class(descSparse$deal)
+```
+
+
+## Converting Deal from Logical to Factor
+```{r}
+descSparse$deal<-as.factor(descSparse$deal)
+```
+
+
+## Checking if it converted to factor correctly
+
+```{r}
+class(descSparse$deal)
+```
+
+
+## Creating Backup of dataset
+```{r}
+backup2shartank<- descSparse
+```
+
+
+
+```{r}
+str(descSparse$deal)
+```
+
+
+# Predictive modelling. 
+
+Using 'Deal' as the dependent variable. Build CART, Logistic Regression and Random Forest to predict if Investors will invest in the business or not.
+
+
+## Split data into Train and Test
+```{r}
+
+set.seed(123)
+split = sample.split(descSparse$deal, SplitRatio = 0.8)
+training_set = subset(descSparse, split == TRUE)
+test_set = subset(descSparse, split == FALSE)
+```
+
+
+
+## Check Split
+```{r}
+table(training_set$deal)
+table(test_set$deal)
+
+```
+
+
+
+# CART
+
+
+```{r}
+
+CARTSharkTank = rpart(deal ~ ., data=training_set, method="class")
+```
+
+## Plot CART Diagram
+```{r}
+rpart.plot(CARTSharkTank)
+```
+
+
+```{r}
+prp(CARTSharkTank, extra="auto")
+```
+
+
+
+## Predicting CART Test
+```{r}
+predictCARTest = predict(CARTSharkTank, test_set[-896], type="class")
+```
+
+## Evaluating CART Test Set
+
+
+```{r}
+confusionMatrix(data = predictCARTest,reference = test_set$deal, mode = "everything",positive = "TRUE")
+```
+
+
+
+
+
+
+# Random Forest Model
+
+## Random forest model
+
+```{r}
+
+classifierRF = randomForest(x = training_set[-896],
+                          y = training_set$deal,
+                          ntree = 30)
+```
+
+
+
+
+## Predicting the Test set results
+
+
+
+```{r}
+y_pred =  predict(classifierRF, test_set, type="class")
+```
+
+
+
+## Evaluating Test Set with Random Forest
+
+```{r}
+confusionMatrix(data = y_pred,reference = test_set$deal, mode = "everything",positive = "TRUE")
+```
+
+
+
+
+
+
+## variable importance as measured by a Random Forest 
+
+```{r fig.height=15}
+
+varImpPlot(classifierRF,main='Variable Importance Plot: Shark Tank')
+```
+
+
+
+
+
+# Logistic Regression Model
+
+## Building Logistic Regression Model
+
+```{r}
+Sharktanklogistic = glm(deal~., data = training_set,family="binomial")
+```
+
+
+
+## Make predictions
+
+```{r}
+predictLogistic = predict(Sharktanklogistic, newdata =test_set[-896],type = "response")
+```
+
+```{r}
+predictLogistic
+```
+
+
+## Evaluate the performance of the Random Forest
+
+
+```{r}
+ypredlog <- as.factor(ifelse(predictLogistic > 0.5,"TRUE","FALSE"))
+
+```
+
+
+
+```{r}
+confusionMatrix(data = ypredlog,reference = test_set$deal, mode = "everything",positive = "TRUE")
+```
+
+Performance of the Models(BEFORE)
+
+
+|             | CART   | Random Forest | Logistic Regression |
+|-------------|--------|---------------|---------------------|
+| Accuracy    | 0.5758 | 0.5859        | 0.5657              |
+| Sensitivity | 0.3600 | 0.5200        | 0.6400              |
+| Specificity | 0.7959 | 0.6531        | 0.4898              |
+
+
+
+
+\newpage
+
+# additional variable called as Ratio which will be derived using column askfor/valuation 
+
+
+# New CART Model with additional Ratio variable
+
+
+```{r}
+SharktankwithRATIO <- descSparse
+```
+
+
+
+
+```{r}
+SharktankwithRATIO$ratio = SharkTankData$askedFor/SharkTankData$valuation
+```
+
+
+
+
+## Split data into Train and Test
+```{r}
+
+set.seed(123)
+splitnew = sample.split(SharktankwithRATIO$deal, SplitRatio = 0.8)
+Newtraining_set = subset(SharktankwithRATIO, splitnew == TRUE)
+Newtest_set = subset(SharktankwithRATIO, splitnew == FALSE)
+```
+
+
+
+
+```{r}
+
+NEWCARTSharkTank = rpart(deal ~ ., data=Newtraining_set, method="class")
+```
+
+## Plot CART Diagram
+```{r}
+rpart.plot(NEWCARTSharkTank)
+```
+
+
+
+
+```{r}
+prp(NEWCARTSharkTank, extra="auto")
+```
+
+
+
+
+
+## Predicting NEW CART TestData
+```{r}
+NewpredictCARTest = predict(NEWCARTSharkTank, Newtest_set[-896], type="class")
+```
+
+## Evaluating Test Set
+
+
+```{r}
+confusionMatrix(data = NewpredictCARTest,reference = Newtest_set$deal, mode = "everything",positive = "TRUE")
+```
+
+
+# New Random Forest Model
+
+## New Random forest model
+
+```{r}
+
+NewclassifierRF = randomForest(x = Newtraining_set[-896],
+                          y = Newtraining_set$deal,
+                          ntree = 30)
+```
+
+
+
+
+## Predicting the Test set results
+
+
+
+```{r}
+Newy_pred =  predict(NewclassifierRF, Newtest_set, type="class")
+```
+
+
+
+## Evaluating Test Set with Random Forest
+
+```{r}
+confusionMatrix(data = Newy_pred,reference = Newtest_set$deal, mode = "everything",positive = "TRUE")
+```
+
+
+
+
+
+
+## variable importance as measured by a Random Forest 
+
+```{r fig.height=15}
+
+varImpPlot(NewclassifierRF,main='Variable Importance Plot: Shark Tank')
+```
+
+
+# New Logistic Regression Model
+
+## Building New Logistic Regression Model
+
+```{r}
+NewSharktanklogistic = glm(deal~., data = Newtraining_set,family="binomial")
+```
+
+
+
+## Make predictions
+
+```{r}
+NewpredictLogistic = predict(NewSharktanklogistic, newdata =Newtest_set[-896],type = "response")
+```
+
+
+
+
+## Evaluate the performance of the Random Forest
+
+
+```{r}
+Newypredlog <- as.factor(ifelse(NewpredictLogistic > 0.5,"TRUE","FALSE"))
+
+```
+
+
+
+```{r}
+confusionMatrix(data = Newypredlog,reference = Newtest_set$deal, mode = "everything",positive = "TRUE")
+```
+\newpage
+# Conclusion
+
+Let's compare the accuracy of each model before ratio feature added and after ratio feature added.
+
+## Before and After Model Comparission
+
+
+|             | CART(1) | CART(2) | RF(1)  | RF(2)  | LReg(1) | LReg(2) |
+|-------------|---------|---------|--------|--------|---------|---------|
+| Accuracy    | 0.5758  | 0.5051  | 0.5859 | 0.5152 | 0.5657  | 0.5455  |
+| Sensitivity | 0.3600  | 0.2600  | 0.5200 | 0.4200 | 0.6400  | 0.6400  |
+| Specificity | 0.7959  | 0.7551  | 0.6531 | 0.6122 | 0.4898  | 0.4490  |
+
+
+
+* CART 1 (Before) is performing better 57.58 than CART 2(After) 50.51
+
+* RF 1 (Before ) 58.59 performing better than RF 2(After) 51.52
+
+* Logistic Regression(1) 56.57 is better than Logistic Regression(2) 54.55
+
+* COLUMN RATIO IS REDUCING PERFORMANCE OF ALL THE MODELS. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
